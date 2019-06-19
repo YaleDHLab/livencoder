@@ -36,7 +36,7 @@ if __name__ == "__main__":
     in_file = 'raymond-sample.npy'
     d = np.load(in_file)
     d = d[:,np.arange(d.shape[1])[1:]]
-    d = d[3200:]
+    d = d[4200:]
 
     for iframe in range(d.shape[0]):
         time.sleep(0.0083)
