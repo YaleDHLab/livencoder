@@ -3,6 +3,8 @@
 import numpy as np
 import time
 
+sleep = 0.0083 # 120 fps sleep
+
 point_labels = ['C7',
           'CLAV', 'LANK',
           'LBHD', 'LBSH',
@@ -38,13 +40,14 @@ if __name__ == "__main__":
     d = d[:,np.arange(d.shape[1])[1:]]
     d = d[4200:]
 
-    for iframe in range(d.shape[0]):
-        time.sleep(0.0083)
-        print("frame_number:%d"%iframe)
-        print("n_subjects:1")
-        print("subject_id:0")
-        print("subject_name:Raymond")
-        print("markers:%s"%",".join(point_labels))
-        print("coords:%s"%",".join(["%g"%x for x in d[iframe].reshape(-1)]))
-        print("end_frame:%d"%iframe)
-        print()
+    while True:
+      for iframe in range(d.shape[0]):
+          time.sleep(sleep)
+          print("frame_number:%d"%iframe)
+          print("n_subjects:1")
+          print("subject_id:0")
+          print("subject_name:Raymond")
+          print("markers:%s"%",".join(point_labels))
+          print("coords:%s"%",".join(["%g"%x for x in d[iframe].reshape(-1)]))
+          print("end_frame:%d"%iframe)
+          print()
