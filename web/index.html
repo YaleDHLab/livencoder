@@ -52,9 +52,15 @@
     </div>
   </div>
 
+  <!--
   <script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/97/three.min.js'></script>
-  <script src='https://cdnjs.cloudflare.com/ajax/libs/gsap/2.1.3/TweenLite.min.js'></script>
   <script src='https://rawgit.com/YaleDHLab/pix-plot/master/assets/js/trackball-controls.js'></script>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/d3/5.9.2/d3.min.js'></script>
+  -->
+
+  <script src='assets/three.min.js'></script>
+  <script src='assets/trackball-controls.js'></script>
+  <script src='assets/d3.min.js'></script>
 
   <script type='x-shader/x-vertex' id='vertex-shader'>
   precision highp float;
@@ -95,31 +101,25 @@
 
   <script>
 
-  // generate a scene object
-  var scene = new THREE.Scene();
+  // global model data
+  var allX = [],
+      allZ = [],
+      allW = [],
+      verts = 52,
+      dims = 3,
+      framesToShow = 30;
 
-  // generate a camera
-  var container = getContainer();
-  var aspectRatio = container.w / container.h;
-  var camera = new THREE.PerspectiveCamera(75, aspectRatio, 0.01, 1000);
-  camera.position.set(0, 0.7, -1);
-
-  // generate a renderer
-  var renderer = new THREE.WebGLRenderer({antialias: true, alpha: true,});
-  renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(container.w, container.h);
-  container.elem.appendChild(renderer.domElement);
-
-  // add controls
-  var controls = new THREE.TrackballControls(camera, renderer.domElement);
-  controls.target.set(0.02, 0.15, .36);
+  // aliases
+  var BA = THREE.BufferAttribute,
+      IBA = THREE.InstancedBufferAttribute,
+      ARR = Float32Array;
 
   /**
   * Helpers
   **/
 
-  function getContainer() {
-    var elem = document.querySelector('#scene-x');
+  function getElement(selector) {
+    var elem = document.querySelector(selector);
     return {
       elem: elem,
       w: elem.clientWidth,
@@ -142,35 +142,140 @@
     xmlhttp.send();
   };
 
-  window.addEventListener('resize', function() {
-    var container = getContainer();
-    camera.aspect = container.w / container.h;
-    camera.updateProjectionMatrix();
-    renderer.setSize(container.w, container.h);
+  // create a new scene
+  function World(obj) {
+    this.obj = obj;
+    this.scene = new THREE.Scene();
+    this.container = getElement(obj.container);
+    this.aspectRatio = this.container.w / this.container.h;
+    this.camera = new THREE.PerspectiveCamera(75, this.aspectRatio, 0.01, 1000);
+    this.camera.position.set(obj.cam.x, obj.cam.y, obj.cam.z);
+    this.renderer = new THREE.WebGLRenderer({antialias: true, alpha: true,});
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(this.container.w, this.container.h);
+    this.container.elem.appendChild(this.renderer.domElement);
+    this.controls = new THREE.TrackballControls(this.camera, this.renderer.domElement);
+    this.controls.target.set(obj.controls.x, obj.controls.y, obj.controls.z);
+    // helpers
+    this.translations = obj.translations;
+    this.geometry = new THREE.InstancedBufferGeometry();
+    this.material = new THREE.RawShaderMaterial({
+      vertexShader: document.querySelector('#vertex-shader').textContent,
+      fragmentShader: document.querySelector('#fragment-shader').textContent,
+      transparent: true,
+      blending: THREE.NormalBlending,
+    });
+    // grid
+    if (obj.grid) this.scene.add(new THREE.GridHelper(100, 100));
+    // resize handler
+    window.addEventListener('resize', function() {
+      this.container = getElement(this.obj.container);
+      this.camera.aspect = this.container.w / this.container.h;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(this.container.w, this.container.h);
+    }.bind(this))
+    // initializer
+    this.initialize = function(data) {
+      this.geometry.addAttribute('position',
+        new BA(new ARR([0, 0, 0]), 3));
+      this.geometry.addAttribute('translation',
+        new IBA(getTranslations(data, this.translations), 3, true, 1));
+      this.geometry.addAttribute('size',
+        new IBA(getSizes(this.obj.n, this.obj.pointScalar), 1, true, 1));
+      // build mesh
+      this.mesh = new THREE.Points(this.geometry, this.material);
+      this.mesh.rotation.x = -Math.PI / 2;
+      this.mesh.frustumCulled = false; // prevent mesh from clipping on drag
+      this.scene.add(this.mesh);
+    }.bind(this);
+    // update function
+    this.update = function(data) {
+      this.translations = getTranslations(data, this.translations);
+      this.mesh.geometry.attributes.translation.array = this.translations;
+      this.mesh.geometry.attributes.translation.needsUpdate = true;
+      this.renderer.render(this.scene, this.camera);
+      this.controls.update();
+    }.bind(this);
+    // api
+    return this;
+  }
+
+  // main data loop
+  function loadFrame() {
+    get('http://localhost:5050/api/frame', function(data) {
+      if (allX.length >= framesToShow) allX = allX.slice(0, framesToShow-1)
+      if (allZ.length >= framesToShow) allZ = allZ.slice(0, framesToShow-1)
+      if (allW.length >= framesToShow) allW = allW.slice(0, framesToShow-1)
+
+      // push so the rendering draws older frames first then newer frames
+      allX.unshift(data.x);
+      allZ.unshift(data.z);
+      allW.unshift(data.w);
+
+      // update the plots
+      worldX.update(allX);
+      worldZ.update(allZ);
+    })
+  }
+
+  function getSizes(n, pointScalar) {
+    var buff = new ARR(framesToShow * n);
+    for (var i=0; i<buff.length; i++) {
+      buff[i] = ((1.0 - (Math.floor(i/n) / framesToShow)) ** 3) * 10 * pointScalar;
+    }
+    return buff;
+  }
+
+  function getTranslations(data, buff) {
+    var iter = 0;
+    for (var i=0; i<data.length; i++) {
+      for (var j=0; j<data[i].length; j++) {
+        for (var k=0; k<data[i][j].length; k++) {
+          buff[iter++] = data[i][j][k];
+        }
+      }
+    }
+    return buff;
+  }
+
+  /**
+  * X scene
+  **/
+
+  var worldX = new World({
+    container: '#scene-x',
+    cam: {x: 0, y: 0.7, z: -1},
+    controls: {x: 0.02, y: 0.15, z: 0.36},
+    grid: true,
+    translations: new Float32Array(verts * dims * framesToShow),
+    n: verts, // verts per frame drawn in this world
+    name: 'x',
+    pointScalar: 1,
   })
 
   /**
-  * Custom
+  * Z scene
   **/
 
-  // model data
-  var allX = [],
-      allZ = [],
-      allW = [],
-      verts = 52,
-      dims = 3,
-      xScalar = 1,
-      framesToShow = 30;
+  var worldZ = new World({
+    container: '#scene-z',
+    cam: {x: 0, y: 0, z: -3},
+    controls: {x: 0, y: 0, z: 0},
+    grid: false,
+    translations: new Float32Array(3 * framesToShow),
+    n: 1,
+    name: 'z',
+    pointScalar: 3,
+  })
 
-  // gl
-  var geometry = new THREE.InstancedBufferGeometry(),
-      mesh,
-      material,
-      translations = new Float32Array(verts * dims * framesToShow),
-      translationsIter,
-      BA = THREE.BufferAttribute,
-      IBA = THREE.InstancedBufferAttribute,
-      ARR = Float32Array;
+  /**
+  * Main
+  **/
+
+  function render() {
+    requestAnimationFrame(render);
+    if (worldX.mesh && worldZ.mesh) loadFrame();
+  };
 
   // initialize the geometry
   get('http://localhost:5050/api/frame', function(data) {
@@ -178,80 +283,15 @@
     allZ.unshift(data.z);
     allW.unshift(data.w);
 
-    geometry.addAttribute('position',
-      new BA(new ARR([0, 0, 0]), 3));
-    geometry.addAttribute('translation',
-      new IBA(getTranslations(), 3, true, 1));
-    geometry.addAttribute('size',
-      new IBA(getSizes(), 1, true, 1));
+    // initialize the geometries
+    worldX.initialize(allX);
+    worldZ.initialize(allZ);
 
-    material = new THREE.RawShaderMaterial({
-      vertexShader: document.querySelector('#vertex-shader').textContent,
-      fragmentShader: document.querySelector('#fragment-shader').textContent,
-      transparent: true,
-      blending: THREE.NormalBlending,
-    });
-    material.transparent = true;
-
-    mesh = new THREE.Points(geometry, material);
-    mesh.name = 'x';
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.frustumCulled = false; // prevent mesh from clipping on drag
-    scene.add(mesh);
+    // run the render loops
+    render();
   })
 
-  function getTranslations() {
-    translationsIter = 0;
-    for (var i=0; i<allX.length; i++) {
-      var x = allX[i];
-      for (var j=0; j<x.length; j++) {
-        for (var k=0; k<dims; k++) {
-          translations[translationsIter++] = x[j][k] * xScalar;
-        }
-      }
-    }
-    return translations;
-  }
-
-  function getSizes() {
-    var buff = new ARR(framesToShow * verts);
-    for (var i=0; i<buff.length; i++) {
-      buff[i] = ((1.0 - (Math.floor(i/verts) / framesToShow)) ** 3) * 10;
-    }
-    return buff;
-  }
-
-  function loadFrame() {
-    get('http://localhost:5050/api/frame', function(data) {
-      while (allX.length > framesToShow) allX = allX.slice(0, framesToShow)
-      while (allZ.length > framesToShow) allZ = allZ.slice(0, framesToShow)
-      while (allW.length > framesToShow) allW = allW.slice(0, framesToShow)
-
-      // push so the rendering draws older frames first then newer frames
-      allX.unshift(data.x);
-      allZ.unshift(data.z);
-      allW.unshift(data.w);
-
-      translations = getTranslations();
-      mesh.geometry.attributes.translation.array = translations;
-      mesh.geometry.attributes.translation.needsUpdate = true;
-    })
-  }
-
-  // add grid helper
-  var gridHelper = new THREE.GridHelper(100, 100);
-  gridHelper.name = 'grid-helper';
-  scene.add(gridHelper);
-
-  // render loop
-  function render() {
-    requestAnimationFrame(render);
-    if (mesh) loadFrame();
-    renderer.render(scene, camera);
-    controls.update();
-  };
-
-  render();
   </script>
+
 </body>
 </html>

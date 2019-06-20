@@ -111,10 +111,14 @@ def get_frame():
   frame = json.loads(r.get('frame').decode('utf8'))
   return jsonify(encode(frame))
 
+# static asset route
+@app.route('/assets/<path:path>')
+def asset(path):
+  return send_from_directory('assets', path)
 
+# html content route
 @app.route('/')
 def index():
-  # return the html content
   return send_from_directory('.', 'index.html')
 
 
