@@ -1,0 +1,351 @@
+<html>
+<head>
+  <style>
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    background: #fff;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+  }
+  #container {
+    height: 100%;
+    box-sizing: border-box;
+    padding: 10%;
+    background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.1));
+    white-space: nowrap;
+  }
+  #container .cell {
+    height: 100%;
+    width: 33%;
+    display: inline-block;
+    box-sizing: border-box;
+    padding: 20px;
+    vertical-align: top;
+  }
+  .cell > div {
+    height: 100%;
+    width: 100%;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+  }
+  #scene-x,
+  #scene-w,
+  #scene-z {
+    position: relative;
+  }
+  #scene-x::after {
+    content: 'Vertex Positions';
+  }
+  #scene-w::after {
+    content: 'Body Orientation';
+  }
+  #scene-z::after {
+    content: 'Latent Space Position';
+  }
+  #scene-x::after,
+  #scene-w::after,
+  #scene-z::after {
+    position: absolute;
+    bottom: -30px;
+    font-size: 16px;
+    font-family: courier;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
+  </style>
+  <meta charset='UTF-8'>
+</head>
+<body>
+
+  <div id='container'>
+    <div class='cell'>
+      <div id='scene-z'></div>
+    </div>
+    <div class='cell'>
+      <div id='scene-x'></div>
+    </div>
+    <div class='cell'>
+      <div id='scene-w'></div>
+    </div>
+  </div>
+
+  <!--
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/97/three.min.js'></script>
+  <script src='https://rawgit.com/YaleDHLab/pix-plot/master/assets/js/trackball-controls.js'></script>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/d3/5.9.2/d3.min.js'></script>
+  -->
+
+  <script src='assets/three.min.js'></script>
+  <script src='assets/trackball-controls.js'></script>
+  <script src='assets/d3.min.js'></script>
+
+  <script type='x-shader/x-vertex' id='vertex-shader'>
+  precision highp float;
+
+  uniform mat4 modelViewMatrix;
+  uniform mat4 projectionMatrix;
+
+  attribute vec3 position;
+  attribute vec3 translation;
+  attribute float size;
+
+  varying float vAlpha;
+
+  void main() {
+    // set point position
+    vec3 pos = position + translation;
+    vec4 projected = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projected;
+    gl_PointSize = size;
+    vAlpha = size;
+  }
+  </script>
+
+  <script type='x-shader/x-fragment' id='fragment-shader'>
+  precision highp float;
+
+  varying float vAlpha;
+
+  void main() {
+    // make points round; convert [0,1] to [-0.5,0.5] then check if outside radius
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    if(length(coord) > 0.5) discard;
+
+    // set the vertex color
+    gl_FragColor = vec4(0.0, 0.0, 0.0, vAlpha);
+  }
+  </script>
+
+  <script>
+
+  // global model data
+  var allX = [],
+      allZ = [],
+      allW = [],
+      verts = 52,
+      dims = 3,
+      framesToShow = 30;
+
+  // aliases
+  var BA = THREE.BufferAttribute,
+      IBA = THREE.InstancedBufferAttribute,
+      ARR = Float32Array;
+
+  /**
+  * Helpers
+  **/
+
+  function getElement(selector) {
+    var elem = document.querySelector(selector);
+    return {
+      elem: elem,
+      w: elem.clientWidth,
+      h: elem.clientHeight,
+    }
+  }
+
+  function get(url, onSuccess, onErr) {
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onreadystatechange = function() {
+      if (xmlhttp.readyState == XMLHttpRequest.DONE) {
+        if (xmlhttp.status === 200) {
+          if (onSuccess) onSuccess(JSON.parse(xmlhttp.responseText))
+        } else {
+          if (onErr) onErr(xmlhttp)
+        }
+      };
+    };
+    xmlhttp.open('GET', url, true);
+    xmlhttp.send();
+  };
+
+  // create a new scene
+  function World(obj) {
+    this.obj = obj;
+    this.scene = new THREE.Scene();
+    this.container = getElement(obj.container);
+    this.aspectRatio = this.container.w / this.container.h;
+    this.camera = new THREE.PerspectiveCamera(75, this.aspectRatio, 0.01, 1000);
+    this.camera.position.set(obj.cam.x, obj.cam.y, obj.cam.z);
+    this.renderer = new THREE.WebGLRenderer({antialias: true, alpha: true,});
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(this.container.w, this.container.h);
+    this.container.elem.appendChild(this.renderer.domElement);
+    this.controls = new THREE.TrackballControls(this.camera, this.renderer.domElement);
+    this.controls.target.set(obj.controls.x, obj.controls.y, obj.controls.z);
+    // helpers
+    this.translations = obj.translations;
+    this.geometry = new THREE.InstancedBufferGeometry();
+    this.material = new THREE.RawShaderMaterial({
+      vertexShader: document.querySelector('#vertex-shader').textContent,
+      fragmentShader: document.querySelector('#fragment-shader').textContent,
+      transparent: true,
+      blending: THREE.NormalBlending,
+    });
+    // grid
+    if (obj.grid) this.scene.add(new THREE.GridHelper(100, 100));
+    // resize handler
+    window.addEventListener('resize', function() {
+      this.container = getElement(this.obj.container);
+      this.camera.aspect = this.container.w / this.container.h;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(this.container.w, this.container.h);
+    }.bind(this))
+    // initializer
+    this.initialize = function(data) {
+      this.geometry.addAttribute('position',
+        new BA(new ARR([0, 0, 0]), 3));
+      this.geometry.addAttribute('translation',
+        new IBA(getTranslations(data, this.translations), 3, true, 1));
+      this.geometry.addAttribute('size',
+        new IBA(getSizes(this.obj.n, this.obj.pointScalar), 1, true, 1));
+      // build mesh
+      this.mesh = new THREE.Points(this.geometry, this.material);
+      this.mesh.rotation.x = -Math.PI / 2;
+      this.mesh.frustumCulled = false; // prevent mesh from clipping on drag
+      this.scene.add(this.mesh);
+    }.bind(this);
+    // update function
+    this.update = function(data) {
+      this.translations = getTranslations(data, this.translations);
+      this.mesh.geometry.attributes.translation.array = this.translations;
+      this.mesh.geometry.attributes.translation.needsUpdate = true;
+      this.renderer.render(this.scene, this.camera);
+      this.controls.update();
+    }.bind(this);
+    // api
+    return this;
+  }
+
+  // main data loop
+  function loadFrame() {
+    get('http://localhost:5050/api/frame', function(data) {
+      if (allX.length >= framesToShow) allX = allX.slice(0, framesToShow-1)
+      if (allZ.length >= framesToShow) allZ = allZ.slice(0, framesToShow-1)
+      if (allW.length >= framesToShow) allW = allW.slice(0, framesToShow-1)
+
+      // push so the rendering draws older frames first then newer frames
+      allX.unshift(data.x);
+      allZ.unshift(data.z);
+      allW.unshift(data.w);
+
+      // update the plots
+      worldX.update(allX);
+      worldZ.update(allZ);
+      worldW.update(allW);
+    })
+  }
+
+  function getSizes(n, pointScalar) {
+    var buff = new ARR(framesToShow * n);
+    for (var i=0; i<buff.length; i++) {
+      buff[i] = ((1.0 - (Math.floor(i/n) / framesToShow)) ** 3) * 10 * pointScalar;
+    }
+    return buff;
+  }
+
+  function getTranslations(data, buff) {
+    var iter = 0;
+    for (var i=0; i<data.length; i++) {
+      for (var j=0; j<data[i].length; j++) {
+        for (var k=0; k<data[i][j].length; k++) {
+          buff[iter++] = data[i][j][k];
+          // fill the z dimension in case data primitives are 2D
+          if (data[i][j].length == 2) {
+            buff[iter++] = 0;
+          }
+        }
+      }
+    }
+    return buff;
+  }
+
+  /**
+  * X scene
+  **/
+
+  var worldX = new World({
+    container: '#scene-x',
+    cam: {x: 0, y: 0.7, z: -1},
+    controls: {x: 0.02, y: 0.15, z: 0.36},
+    grid: true,
+    translations: new Float32Array(verts * dims * framesToShow),
+    n: verts, // verts per frame drawn in this world
+    name: 'x',
+    pointScalar: 1,
+  })
+
+  /**
+  * Z scene
+  **/
+
+  var worldZ = new World({
+    container: '#scene-z',
+    cam: {x: 0, y: 0, z: -3},
+    controls: {x: 0, y: 0, z: 0},
+    grid: false,
+    translations: new Float32Array(3 * framesToShow),
+    n: 1,
+    name: 'z',
+    pointScalar: 3,
+  })
+
+  /**
+  * W scene
+  **/
+
+  var worldW = new World({
+    container: '#scene-w',
+    cam: {x: 0, y: 0, z: -3.5},
+    controls: {x: 0, y: 0, z: 0},
+    grid: false,
+    translations: new Float32Array(3 * framesToShow),
+    n: 1,
+    name: 'w',
+    pointScalar: 3,
+    fillZ: true,
+  })
+
+  /**
+  * Main
+  **/
+
+  function render() {
+    requestAnimationFrame(render);
+    if (worldX.mesh && worldZ.mesh) loadFrame();
+  };
+
+  // initialize the geometry
+  get('http://localhost:5050/api/frame', function(data) {
+    allX.unshift(data.x);
+    allZ.unshift(data.z);
+    allW.unshift(data.w);
+
+    // initialize the geometries
+    worldX.initialize(allX);
+    worldZ.initialize(allZ);
+    worldW.initialize(allW);
+
+    // mutate worldW's size buffer
+    var arr = new ARR(worldW.mesh.geometry.attributes.size.array.length);
+    arr[0] = 30;
+    worldW.mesh.geometry.attributes.size.array = arr;
+    worldW.mesh.geometry.attributes.size.needsUpdate = true;
+
+    // run the render loops
+    render();
+  })
+
+  </script>
+
+</body>
+</html>
