@@ -84,9 +84,20 @@ def encode(frame, float_precision=3):
       'w': the orientation of the model within this frame; shape = (1,2)
   '''
   frame = parse_frame(frame)
+  # put the vertices into the correct order
   ordering = [default_labels.index(i) for i in frame['markers']]
-  # x is array with shape (52,3) with one point per vertex in `default labels`
-  x = frame['coords'][ordering]
+  x = frame['coords'][ordering] # raw x positional coords
+  # use the forarm length as uniform scaling heuristic
+  markers = frame['markers']
+  lelb = markers.index('LELB')
+  lowr = markers.index('LOWR')
+  relb = markers.index('RELB')
+  rowr = markers.index('ROWR')
+  larm = np.sqrt(np.sum((x[lelb]-x[lowr])**2,axis=-1))
+  rarm = np.sqrt(np.sum((x[relb]-x[rowr])**2,axis=-1))
+  armlen = 0.5*(np.median(larm) + np.median(rarm))
+  # scale x by arm length constant
+  x = x / armlen / 10
   # center the array
   x[:,:2] -= x[:,:2].mean(axis=-2, keepdims=True)
   # convert the input array into the right input shape

@@ -3,7 +3,7 @@
 import numpy as np
 import time
 
-sleep = 0.0165 # 120 fps sleep
+sleep = 0.01 # 120 fps sleep
 
 default_labels = [
   'C7', 'CLAV', 'LANK', 'LBHD', 'LBSH',
@@ -32,7 +32,7 @@ if __name__ == '__main__':
       print('n_subjects:1')
       print('subject_id:0')
       print('subject_name:Raymond')
-      print('markers:%s'%','.join(point_labels))
+      print('markers:%s'%','.join(default_labels))
       print('coords:%s'%','.join(['%g'%x for x in d[iframe].reshape(-1)]))
       print('end_frame:%d'%iframe)
       print()

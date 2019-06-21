@@ -97,16 +97,21 @@
   attribute vec3 position;
   attribute vec3 translation;
   attribute float size;
+  attribute float color;
 
   varying float vAlpha;
+  varying float vColor;
 
   void main() {
     // set point position
     vec3 pos = position + translation;
-    vec4 projected = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+    vec4 projected = projectionMatrix * mvPos;
     gl_Position = projected;
     gl_PointSize = size;
+    gl_PointSize = gl_PointSize / -mvPos.z;
     vAlpha = size;
+    vColor = color;
   }
   </script>
 
@@ -114,6 +119,7 @@
   precision highp float;
 
   varying float vAlpha;
+  varying float vColor;
 
   void main() {
     // make points round; convert [0,1] to [-0.5,0.5] then check if outside radius
@@ -121,7 +127,7 @@
     if(length(coord) > 0.5) discard;
 
     // set the vertex color
-    gl_FragColor = vec4(0.0, 0.0, 0.0, vAlpha);
+    gl_FragColor = vec4(vColor, vColor, vColor, 1.0-vColor);
   }
   </script>
 
@@ -133,7 +139,12 @@
       allW = [],
       verts = 52,
       dims = 3,
-      framesToShow = 30;
+      // variabilize n frames to show by scene
+      nFrames = {
+        x: 30,
+        z: 600,
+        w: 1,
+      }
 
   // aliases
   var BA = THREE.BufferAttribute,
@@ -192,7 +203,10 @@
       blending: THREE.NormalBlending,
     });
     // grid
-    if (obj.grid) this.scene.add(new THREE.GridHelper(100, 100));
+    if (obj.grid) {
+      this.grid = new THREE.GridHelper(100, 100)
+      this.scene.add(this.grid);
+    }
     // resize handler
     window.addEventListener('resize', function() {
       this.container = getElement(this.obj.container);
@@ -202,12 +216,15 @@
     }.bind(this))
     // initializer
     this.initialize = function(data) {
+      var colors = getColors(this.obj);
       this.geometry.addAttribute('position',
         new BA(new ARR([0, 0, 0]), 3));
       this.geometry.addAttribute('translation',
         new IBA(getTranslations(data, this.translations), 3, true, 1));
       this.geometry.addAttribute('size',
-        new IBA(getSizes(this.obj.n, this.obj.pointScalar), 1, true, 1));
+        new IBA(getSizes(this.obj), 1, true, 1));
+      this.geometry.addAttribute('color',
+        new IBA(getColors(this.obj), 1, true, 1));
       // build mesh
       this.mesh = new THREE.Points(this.geometry, this.material);
       this.mesh.rotation.x = -Math.PI / 2;
@@ -229,9 +246,9 @@
   // main data loop
   function loadFrame() {
     get('http://localhost:5050/api/frame', function(data) {
-      if (allX.length >= framesToShow) allX = allX.slice(0, framesToShow-1)
-      if (allZ.length >= framesToShow) allZ = allZ.slice(0, framesToShow-1)
-      if (allW.length >= framesToShow) allW = allW.slice(0, framesToShow-1)
+      if (allX.length >= nFrames.x) allX = allX.slice(0, nFrames.x-1)
+      if (allZ.length >= nFrames.z) allZ = allZ.slice(0, nFrames.z-1)
+      if (allW.length >= nFrames.w) allW = allW.slice(0, nFrames.w-1)
 
       // push so the rendering draws older frames first then newer frames
       allX.unshift(data.x);
@@ -245,10 +262,21 @@
     })
   }
 
-  function getSizes(n, pointScalar) {
-    var buff = new ARR(framesToShow * n);
+  function getSizes(obj) {
+    var buff = new ARR(obj.nSizes);
     for (var i=0; i<buff.length; i++) {
-      buff[i] = ((1.0 - (Math.floor(i/n) / framesToShow)) ** 3) * 10 * pointScalar;
+      var idx = Math.floor(i/obj.nSizesPerFrame), // index of this unit's frame in array
+          scalar = obj.pointScalar; // uniform scalar for point sizes
+      buff[i] = ((1.0 - (idx / nFrames[obj.name])) ** obj.decayCoef) * scalar;
+    }
+    return buff;
+  }
+
+  function getColors(obj) {
+    var buff = new ARR(obj.nSizes);
+    for (var i=0; i<buff.length; i++) {
+      var idx = Math.floor(i/obj.nSizesPerFrame); // index of this unit's frame in array
+      buff[i] = idx / obj.nSizes;
     }
     return buff;
   }
@@ -278,10 +306,12 @@
     cam: {x: 0, y: 0.7, z: -1},
     controls: {x: 0.02, y: 0.15, z: 0.36},
     grid: true,
-    translations: new Float32Array(verts * dims * framesToShow),
-    n: verts, // verts per frame drawn in this world
+    translations: new Float32Array(verts * dims * nFrames.x),
+    nSizes: verts * nFrames.x,
+    nSizesPerFrame: verts,
     name: 'x',
-    pointScalar: 1,
+    pointScalar: 10,
+    decayCoef: 3,
   })
 
   /**
@@ -290,13 +320,15 @@
 
   var worldZ = new World({
     container: '#scene-z',
-    cam: {x: 0, y: 0, z: -3},
+    cam: {x: 0, y: 0, z: -4.5},
     controls: {x: 0, y: 0, z: 0},
     grid: false,
-    translations: new Float32Array(3 * framesToShow),
-    n: 1,
+    translations: new Float32Array(3 * nFrames.z),
+    nSizes: nFrames.z,
+    nSizesPerFrame: 1,
     name: 'z',
-    pointScalar: 3,
+    pointScalar: 30,
+    decayCoef: 1,
   })
 
   /**
@@ -308,11 +340,12 @@
     cam: {x: 0, y: 0, z: -3.5},
     controls: {x: 0, y: 0, z: 0},
     grid: false,
-    translations: new Float32Array(3 * framesToShow),
-    n: 1,
+    translations: new Float32Array(3 * nFrames.w),
+    nSizes: nFrames.w,
+    nSizesPerFrame: 1,
     name: 'w',
-    pointScalar: 3,
-    fillZ: true,
+    pointScalar: 60,
+    decayCoef: 3,
   })
 
   /**
@@ -322,6 +355,10 @@
   function render() {
     requestAnimationFrame(render);
     if (worldX.mesh && worldZ.mesh) loadFrame();
+    if (worldZ.mesh) worldZ.mesh.rotation.z += 0.005;
+    if (worldX.mesh) {
+      worldX.grid.rotation.y += 0.00025;
+    }
   };
 
   // initialize the geometry
@@ -337,7 +374,7 @@
 
     // mutate worldW's size buffer
     var arr = new ARR(worldW.mesh.geometry.attributes.size.array.length);
-    arr[0] = 30;
+    arr[0] = 100;
     worldW.mesh.geometry.attributes.size.array = arr;
     worldW.mesh.geometry.attributes.size.needsUpdate = true;
 
