@@ -20,6 +20,7 @@
     box-sizing: border-box;
     padding: 10%;
     background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.1));
+    white-space: nowrap;
   }
   #container .cell {
     height: 100%;
@@ -215,6 +216,7 @@
       // update the plots
       worldX.update(allX);
       worldZ.update(allZ);
+      worldW.update(allW);
     })
   }
 
@@ -232,6 +234,10 @@
       for (var j=0; j<data[i].length; j++) {
         for (var k=0; k<data[i][j].length; k++) {
           buff[iter++] = data[i][j][k];
+          // fill the z dimension in case data primitives are 2D
+          if (data[i][j].length == 2) {
+            buff[iter++] = 0;
+          }
         }
       }
     }
@@ -269,6 +275,22 @@
   })
 
   /**
+  * W scene
+  **/
+
+  var worldW = new World({
+    container: '#scene-w',
+    cam: {x: 0, y: 0, z: -1.5},
+    controls: {x: 0, y: 0, z: 0},
+    grid: false,
+    translations: new Float32Array(3 * framesToShow),
+    n: 1,
+    name: 'w',
+    pointScalar: 3,
+    fillZ: true,
+  })
+
+  /**
   * Main
   **/
 
@@ -286,6 +308,13 @@
     // initialize the geometries
     worldX.initialize(allX);
     worldZ.initialize(allZ);
+    worldW.initialize(allW);
+
+    // mutate worldW's size buffer
+    var arr = new ARR(worldW.mesh.geometry.attributes.size.array.length);
+    arr[0] = 30;
+    worldW.mesh.geometry.attributes.size.array = arr;
+    worldW.mesh.geometry.attributes.size.needsUpdate = true;
 
     // run the render loops
     render();
