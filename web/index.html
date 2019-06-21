@@ -43,10 +43,10 @@
 
   <div id='container'>
     <div class='cell'>
-      <div id='scene-x'></div>
+      <div id='scene-z'></div>
     </div>
     <div class='cell'>
-      <div id='scene-z'></div>
+      <div id='scene-x'></div>
     </div>
     <div class='cell'>
       <div id='scene-w'></div>
@@ -280,7 +280,7 @@
 
   var worldW = new World({
     container: '#scene-w',
-    cam: {x: 0, y: 0, z: -1.5},
+    cam: {x: 0, y: 0, z: -3.5},
     controls: {x: 0, y: 0, z: 0},
     grid: false,
     translations: new Float32Array(3 * framesToShow),
