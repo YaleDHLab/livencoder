@@ -36,6 +36,31 @@
     background: #f9f9f9;
     border: 1px solid #ddd;
   }
+  #scene-x,
+  #scene-w,
+  #scene-z {
+    position: relative;
+  }
+  #scene-x::after {
+    content: 'Vertex Positions';
+  }
+  #scene-w::after {
+    content: 'Body Orientation';
+  }
+  #scene-z::after {
+    content: 'Latent Space Position';
+  }
+  #scene-x::after,
+  #scene-w::after,
+  #scene-z::after {
+    position: absolute;
+    bottom: -30px;
+    font-size: 16px;
+    font-family: courier;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
   </style>
   <meta charset='UTF-8'>
 </head>
